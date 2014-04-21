@@ -42,7 +42,6 @@ module VagrantPlugins
       def prepare(machine, folders, opts)
         machine.ui.output(I18n.t("vagrant_sf_smb.preparing"))
 
-        script_path = File.expand_path("../scripts/set_share.ps1", __FILE__)
 
         # If we need auth information, then ask the user.
         need_auth = false
@@ -54,13 +53,31 @@ module VagrantPlugins
         end
 
         if need_auth
-          machine.ui.detail(I18n.t("vagrant_sf_smb.warning_password") + "\n ")
-          @creds[:username] = machine.ui.ask("Username: ")
+            script_path = File.expand_path("../scripts/user_info.ps1", __FILE__)
+            r = Vagrant::Util::PowerShell.execute(script_path)
+            if r.exit_code != 0
+              raise Errors::PowershellError,
+                script: script_path,
+                stderr: r.stderr
+            end
+
+            
+          
+          @creds[:username] = JSON.parse(r.stdout)["username"]
+          @creds[:domain] = JSON.parse(r.stdout)["domain"]
+          machine.ui.detail( @creds[:username] + "\n ")
+          machine.ui.detail( @creds[:domain] + "\n ")
+          # machine.ui.detail(I18n.t("vagrant_sf_smb.warning_password") + "\n ")
+          # @creds[:username] = machine.ui.ask("Username: ")
+          # @creds[:password] = machine.ui.ask("Password (will be hidden): ", echo: false)
           @creds[:password] = machine.ui.ask("Password (will be hidden): ", echo: false)
         end
 
+        script_path = File.expand_path("../scripts/set_share.ps1", __FILE__)
+
         folders.each do |id, data|
           hostpath = data[:hostpath]
+          machine.ui.detail( hostpath + "\n ")
 
           data[:smb_id] ||= Digest::MD5.hexdigest(
             "#{machine.id}-#{id.gsub("/", "-")}")
@@ -119,6 +136,7 @@ module VagrantPlugins
           data[:smb_host] ||= host_ip
           data[:smb_username] ||= @creds[:username]
           data[:smb_password] ||= @creds[:password]
+          data[:smb_domain] ||= @creds[:domain]
 
           # Default the owner/group of the folder to the SSH user
           data[:owner] ||= ssh_info[:username]
